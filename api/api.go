@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"time"
 )
 
@@ -19,16 +18,13 @@ type Client struct {
 
 // NewClient creates a new API client
 func NewClient() (*Client, error) {
-	// Get API credentials from environment
-	apiKey := os.Getenv("OPENPROJECT_API_KEY")
-	baseURL := os.Getenv("OPENPROJECT_BASE_URL")
-
-	if apiKey == "" || baseURL == "" {
-		return nil, fmt.Errorf("please set OPENPROJECT_API_KEY and OPENPROJECT_BASE_URL environment variables")
+	credentials, err := GetCredentials()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get credentials: %v", err)
 	}
 
 	// Parse the base URL
-	parsedURL, err := url.Parse(baseURL)
+	parsedURL, err := url.Parse(BaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("invalid base URL: %v", err)
 	}
@@ -36,7 +32,7 @@ func NewClient() (*Client, error) {
 	return &Client{
 		httpClient: &http.Client{Timeout: 30 * time.Second},
 		host:       parsedURL,
-		token:      apiKey,
+		token:      credentials.APIKey,
 	}, nil
 }
 
