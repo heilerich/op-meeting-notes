@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/heilerich/op-meeting-notes/api"
@@ -24,12 +25,13 @@ func NewTimeEntryService(client *api.Client) *TimeEntryService {
 
 // GroupedTimeEntry represents time entries grouped by project and work package
 type GroupedTimeEntry struct {
-	ProjectTitle     string
-	WorkPackageID    int
-	WorkPackageTitle string
-	CombinedComment  string
-	TotalHours       float64
-	Representative   api.TimeEntry // First entry used as representative
+	ProjectTitle      string
+	WorkPackageID     int
+	WorkPackageTitle  string
+	WorkPackageClosed bool
+	CombinedComment   string
+	TotalHours        float64
+	Representative    api.TimeEntry // First entry used as representative
 }
 
 // GetTimeEntriesForWeek fetches and groups time entries for a specific week
@@ -161,4 +163,130 @@ func startOfWeek(t time.Time) time.Time {
 		weekday = 7
 	}
 	return t.AddDate(0, 0, -int(weekday-time.Monday)).Truncate(24 * time.Hour)
+}
+
+// UpdateWorkPackageClosedStatus checks the status of work packages and updates the WorkPackageClosed field
+// This function is optimized to batch and parallelize API calls for better performance
+func (s *TimeEntryService) UpdateWorkPackageClosedStatus(entries []GroupedTimeEntry) error {
+	// Step 1: Collect unique work package IDs
+	uniqueWorkPackageIDs := make(map[int]bool)
+	for _, entry := range entries {
+		if entry.WorkPackageID != 0 {
+			uniqueWorkPackageIDs[entry.WorkPackageID] = true
+		}
+	}
+
+	if len(uniqueWorkPackageIDs) == 0 {
+		return nil // Nothing to process
+	}
+
+	// Convert to slice for iteration
+	workPackageIDs := make([]int, 0, len(uniqueWorkPackageIDs))
+	for id := range uniqueWorkPackageIDs {
+		workPackageIDs = append(workPackageIDs, id)
+	}
+
+	// Step 2: Fetch all work packages in parallel
+	workPackageResults := make(map[int]*api.WorkPackage)
+	workPackageErrors := make(map[int]error)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
+	for _, id := range workPackageIDs {
+		wg.Add(1)
+		go func(workPackageID int) {
+			defer wg.Done()
+
+			workPackage, err := s.client.GetWorkPackage(workPackageID)
+
+			mu.Lock()
+			if err != nil {
+				workPackageErrors[workPackageID] = err
+			} else {
+				workPackageResults[workPackageID] = workPackage
+			}
+			mu.Unlock()
+		}(id)
+	}
+	wg.Wait()
+
+	// Step 3: Collect unique status hrefs from successfully fetched work packages
+	uniqueStatusHrefs := make(map[string]bool)
+	statusHrefToWorkPackageIDs := make(map[string][]int) // Track which work packages use each status
+
+	for id, workPackage := range workPackageResults {
+		if workPackage.Links.Status.Href != "" {
+			href := workPackage.Links.Status.Href
+			uniqueStatusHrefs[href] = true
+			statusHrefToWorkPackageIDs[href] = append(statusHrefToWorkPackageIDs[href], id)
+		}
+	}
+
+	// Step 4: Fetch all statuses in parallel
+	statusResults := make(map[string]*api.Status)
+	statusErrors := make(map[string]error)
+
+	for href := range uniqueStatusHrefs {
+		wg.Add(1)
+		go func(statusHref string) {
+			defer wg.Done()
+
+			status, err := s.client.GetStatus(statusHref)
+
+			mu.Lock()
+			if err != nil {
+				statusErrors[statusHref] = err
+			} else {
+				statusResults[statusHref] = status
+			}
+			mu.Unlock()
+		}(href)
+	}
+	wg.Wait()
+
+	// Step 5: Build final status cache
+	statusCache := make(map[int]bool)
+
+	for href, status := range statusResults {
+		workPackageIDsForStatus := statusHrefToWorkPackageIDs[href]
+		for _, workPackageID := range workPackageIDsForStatus {
+			statusCache[workPackageID] = status.IsClosed
+		}
+	}
+
+	// Step 6: Update entries with cached status information
+	for i := range entries {
+		workPackageID := entries[i].WorkPackageID
+
+		if workPackageID == 0 {
+			continue
+		}
+
+		// Check for work package fetch errors
+		if err, hasError := workPackageErrors[workPackageID]; hasError {
+			fmt.Printf("Warning: Failed to fetch work package %d: %v\n", workPackageID, err)
+			continue
+		}
+
+		// Check if work package was found but had no status link
+		if workPackage, exists := workPackageResults[workPackageID]; exists {
+			if workPackage.Links.Status.Href == "" {
+				fmt.Printf("Warning: Work package %d has no status link\n", workPackageID)
+				continue
+			}
+
+			// Check for status fetch errors
+			if err, hasError := statusErrors[workPackage.Links.Status.Href]; hasError {
+				fmt.Printf("Warning: Failed to fetch status for work package %d: %v\n", workPackageID, err)
+				continue
+			}
+		}
+
+		// Update entry with cached status
+		if isClosed, exists := statusCache[workPackageID]; exists {
+			entries[i].WorkPackageClosed = isClosed
+		}
+	}
+
+	return nil
 }

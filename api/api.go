@@ -109,3 +109,45 @@ func (c *Client) GetTimeEntries(startDate, endDate time.Time) ([]TimeEntry, erro
 
 	return timeEntriesResp.Embedded.Elements, nil
 }
+
+// GetWorkPackage fetches details for a specific work package
+func (c *Client) GetWorkPackage(workPackageID int) (*WorkPackage, error) {
+	path := fmt.Sprintf("/api/v3/work_packages/%d", workPackageID)
+
+	// Make the request
+	body, err := c.makeRequest(path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse response
+	var workPackage WorkPackage
+	if err := json.Unmarshal(body, &workPackage); err != nil {
+		return nil, fmt.Errorf("failed to parse work package response: %v", err)
+	}
+
+	return &workPackage, nil
+}
+
+// GetStatus fetches status details from a status href
+func (c *Client) GetStatus(statusHref string) (*Status, error) {
+	// Parse the URL to extract the path
+	parsedURL, err := url.Parse(statusHref)
+	if err != nil {
+		return nil, fmt.Errorf("invalid status href: %v", err)
+	}
+
+	// Make the request using the path from the href
+	body, err := c.makeRequest(parsedURL.Path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse response
+	var status Status
+	if err := json.Unmarshal(body, &status); err != nil {
+		return nil, fmt.Errorf("failed to parse status response: %v", err)
+	}
+
+	return &status, nil
+}

@@ -5,6 +5,8 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+
+	"github.com/heilerich/op-meeting-notes/models"
 )
 
 func (m Model) doneView() string {
@@ -12,13 +14,15 @@ func (m Model) doneView() string {
 		return QuitTextStyle.Render("No entries selected. Goodbye!")
 	}
 
-	// Group selected entries by project
-	projectEntries := make(map[string][]TimeEntryItem)
+	// Group selected entries by project using updated entries
+	projectEntries := make(map[string][]models.GroupedTimeEntry)
 
 	for i := range m.entriesModel.selected {
-		selectedItem := m.entriesModel.list.Items()[i].(TimeEntryItem)
-		projectTitle := selectedItem.groupedEntry.ProjectTitle
-		projectEntries[projectTitle] = append(projectEntries[projectTitle], selectedItem)
+		if i < len(m.groupedEntries) {
+			selectedEntry := m.groupedEntries[i] // Use updated entries instead of list items
+			projectTitle := selectedEntry.ProjectTitle
+			projectEntries[projectTitle] = append(projectEntries[projectTitle], selectedEntry)
+		}
 	}
 
 	// Build markdown document
@@ -36,31 +40,35 @@ func (m Model) doneView() string {
 		entries := projectEntries[project]
 
 		// Project heading
-		markdown.WriteString(fmt.Sprintf("## %s\n\n", project))
+		markdown.WriteString(fmt.Sprintf("**%s**\n\n", project))
 
 		// Sort entries by work package ID
 		sort.Slice(entries, func(i, j int) bool {
 			// Try to extract work package ID from the href or use a fallback
-			idA := entries[i].groupedEntry.WorkPackageID
-			idB := entries[j].groupedEntry.WorkPackageID
+			idA := entries[i].WorkPackageID
+			idB := entries[j].WorkPackageID
 			return idA < idB
 		})
 
 		// Add work package entries
 		for _, entry := range entries {
-			workPackageID := entry.groupedEntry.WorkPackageID
+			workPackageID := entry.WorkPackageID
 
 			// Use the combined comment from the grouped entry
-			comments := entry.groupedEntry.CombinedComment
+			comments := entry.CombinedComment
 			if comments == "" {
 				comments = "(no comments)"
 			}
 
 			if workPackageID > 0 {
-				markdown.WriteString(fmt.Sprintf("- #%d: %s\n", workPackageID, comments))
+				if entry.WorkPackageClosed {
+					markdown.WriteString(fmt.Sprintf("- %s (~~#%d~~): %s\n", entry.WorkPackageTitle, workPackageID, comments))
+				} else {
+					markdown.WriteString(fmt.Sprintf("- %s (#%d): %s\n", entry.WorkPackageTitle, workPackageID, comments))
+				}
 			} else {
 				// Fallback if we can't get the ID
-				markdown.WriteString(fmt.Sprintf("- %s: %s\n", entry.groupedEntry.WorkPackageTitle, comments))
+				markdown.WriteString(fmt.Sprintf("- %s: %s\n", entry.WorkPackageTitle, comments))
 			}
 		}
 

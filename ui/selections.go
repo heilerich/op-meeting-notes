@@ -38,7 +38,7 @@ type LoadingModel struct {
 
 // Main model that manages different screens
 type Model struct {
-	state            string // "week", "loading", "entries", "done", "confirm_url"
+	state            string // "week", "loading", "loadingTaskStatus", "entries", "done", "confirm_url"
 	weekModel        WeekSelectionModel
 	loadingModel     LoadingModel
 	entriesModel     TimeEntriesModel
@@ -49,6 +49,7 @@ type Model struct {
 
 // Messages
 type TimeEntriesMsg []models.GroupedTimeEntry
+type StatusUpdateCompleteMsg []models.GroupedTimeEntry
 type ErrorMsg error
 
 // Item implements list.Item interface for time entries
@@ -200,13 +201,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.entriesModel.list = l
 		m.state = "entries"
 
+	case StatusUpdateCompleteMsg:
+		// Status update completed, update our entries and show the confirmation view
+		m.groupedEntries = []models.GroupedTimeEntry(msg)
+		m.state = "confirm_url"
+		return m, nil
+
 	case ErrorMsg:
 		// Handle error
 		fmt.Printf("Error: %v\n", msg)
 		return m, tea.Quit
 
 	case spinner.TickMsg:
-		if m.state == "loading" {
+		if m.state == "loading" || m.state == "loadingTaskStatus" {
 			var cmd tea.Cmd
 			m.loadingModel.spinner, cmd = m.loadingModel.spinner.Update(msg)
 			return m, cmd
@@ -255,9 +262,12 @@ func (m Model) updateTimeEntries(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
-		// Process selected entries and move to confirmation state
-		m.state = "confirm_url"
-		return m, nil
+		// First update the work package closed status for selected entries
+		m.state = "loadingTaskStatus"
+		return m, tea.Batch(
+			m.loadingModel.spinner.Tick,
+			m.updateSelectedEntriesStatus(),
+		)
 
 	case " ":
 		// Toggle selection
@@ -307,12 +317,51 @@ func (m Model) fetchTimeEntries(week string) tea.Cmd {
 	}
 }
 
+// updateSelectedEntriesStatus creates a command to update work package closed status for selected entries
+func (m Model) updateSelectedEntriesStatus() tea.Cmd {
+	return func() tea.Msg {
+		// Get only the selected entries
+		selectedEntries := make([]models.GroupedTimeEntry, 0, len(m.entriesModel.selected))
+		for index := range m.entriesModel.selected {
+			if index < len(m.groupedEntries) {
+				selectedEntries = append(selectedEntries, m.groupedEntries[index])
+			}
+		}
+
+		// Update the status for selected entries
+		err := m.timeEntryService.UpdateWorkPackageClosedStatus(selectedEntries)
+		if err != nil {
+			return ErrorMsg(err)
+		}
+
+		// Create updated copy of all entries with the new status information
+		updatedEntries := make([]models.GroupedTimeEntry, len(m.groupedEntries))
+		copy(updatedEntries, m.groupedEntries)
+
+		// Update the entries with the status information from selectedEntries
+		for _, selectedEntry := range selectedEntries {
+			// Find the corresponding entry in the updated slice and update it
+			for j := range updatedEntries {
+				if updatedEntries[j].WorkPackageID == selectedEntry.WorkPackageID &&
+					updatedEntries[j].ProjectTitle == selectedEntry.ProjectTitle {
+					updatedEntries[j].WorkPackageClosed = selectedEntry.WorkPackageClosed
+					break
+				}
+			}
+		}
+
+		return StatusUpdateCompleteMsg(updatedEntries)
+	}
+}
+
 func (m Model) View() string {
 	switch m.state {
 	case "week":
 		return m.weekSelectionView()
 	case "loading":
-		return m.loadingView()
+		return m.loadingView("time entries")
+	case "loadingTaskStatus":
+		return m.loadingView("task status")
 	case "entries":
 		return m.timeEntriesView()
 	case "confirm_url":
@@ -338,8 +387,8 @@ func (m Model) weekSelectionView() string {
 	return s
 }
 
-func (m Model) loadingView() string {
-	return fmt.Sprintf("\n\n   %s Fetching time entries for %s...\n\n", m.loadingModel.spinner.View(), m.loadingModel.week)
+func (m Model) loadingView(item string) string {
+	return fmt.Sprintf("\n\n   %s Fetching %s for %s...\n\n", m.loadingModel.spinner.View(), item, m.loadingModel.week)
 }
 
 func (m Model) timeEntriesView() string {

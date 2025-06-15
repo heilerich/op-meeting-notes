@@ -45,13 +45,50 @@ type TimeEntriesResponse struct {
 	} `json:"_embedded"`
 }
 
-// WorkPackage represents work package details
+// WorkPackage represents work package details from the OpenProject API
+// Following HAL+JSON format as documented at https://www.openproject.org/docs/api/endpoints/work-packages/
 type WorkPackage struct {
+	Type    string `json:"_type"`
 	ID      int    `json:"id"`
 	Subject string `json:"subject"`
-	Type    struct {
-		Name string `json:"name"`
-	} `json:"type"`
+	Links   struct {
+		Self struct {
+			Href  string `json:"href"`
+			Title string `json:"title"`
+		} `json:"self"`
+		Status struct {
+			Href  string `json:"href"`
+			Title string `json:"title"`
+		} `json:"status"`
+		Type struct {
+			Href  string `json:"href"`
+			Title string `json:"title"`
+		} `json:"type"`
+		Project struct {
+			Href  string `json:"href"`
+			Title string `json:"title"`
+		} `json:"project"`
+	} `json:"_links"`
+}
+
+// Status represents a work package status from the OpenProject API
+type Status struct {
+	Type               string `json:"_type"`
+	ID                 int    `json:"id"`
+	Name               string `json:"name"`
+	IsClosed           bool   `json:"isClosed"`
+	Color              string `json:"color"`
+	IsDefault          bool   `json:"isDefault"`
+	IsReadonly         bool   `json:"isReadonly"`
+	ExcludedFromTotals bool   `json:"excludedFromTotals"`
+	DefaultDoneRatio   int    `json:"defaultDoneRatio"`
+	Position           int    `json:"position"`
+	Links              struct {
+		Self struct {
+			Href  string `json:"href"`
+			Title string `json:"title"`
+		} `json:"self"`
+	} `json:"_links"`
 }
 
 // Project represents project details
