@@ -1,6 +1,7 @@
 package models
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strconv"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/heilerich/op-meeting-notes/api"
+	"github.com/heilerich/op-meeting-notes/llm"
 )
 
 // TimeEntryService handles business logic for time entries
@@ -30,8 +32,10 @@ type GroupedTimeEntry struct {
 	WorkPackageTitle  string
 	WorkPackageClosed bool
 	CombinedComment   string
+	LLMSummary        string // New field for the summary
 	TotalHours        float64
-	Representative    api.TimeEntry // First entry used as representative
+	TimeEntryComments []llm.TimeEntryComment
+	Representative    api.TimeEntry
 }
 
 // GetTimeEntriesForWeek fetches and groups time entries for a specific week
@@ -87,11 +91,16 @@ func (s *TimeEntryService) groupTimeEntries(entries []api.TimeEntry) []GroupedTi
 	for key, entries := range groupedEntries {
 		// Collect all comments for this work package
 		var comments []string
+		var timeEntryComments []llm.TimeEntryComment
 		var totalHours float64
 
 		for _, entry := range entries {
 			if entry.Comment.Raw != "" {
 				comments = append(comments, entry.Comment.Raw)
+				timeEntryComments = append(timeEntryComments, llm.TimeEntryComment{
+					Content:   entry.Comment.Raw,
+					Timestamp: entry.SpentOn,
+				})
 			}
 			// Parse hours and add to total
 			if hours, err := strconv.ParseFloat(entry.Hours, 64); err == nil {
@@ -106,12 +115,13 @@ func (s *TimeEntryService) groupTimeEntries(entries []api.TimeEntry) []GroupedTi
 		}
 
 		result = append(result, GroupedTimeEntry{
-			ProjectTitle:     key.projectTitle,
-			WorkPackageID:    key.workPackageID,
-			WorkPackageTitle: key.workPackageTitle,
-			CombinedComment:  combinedComment,
-			TotalHours:       totalHours,
-			Representative:   entries[0], // Use first entry as representative
+			ProjectTitle:      key.projectTitle,
+			WorkPackageID:     key.workPackageID,
+			WorkPackageTitle:  key.workPackageTitle,
+			CombinedComment:   combinedComment,
+			TotalHours:        totalHours,
+			TimeEntryComments: timeEntryComments,
+			Representative:    entries[0], // Use first entry as representative
 		})
 	}
 
@@ -285,6 +295,92 @@ func (s *TimeEntryService) UpdateWorkPackageClosedStatus(entries []GroupedTimeEn
 		// Update entry with cached status
 		if isClosed, exists := statusCache[workPackageID]; exists {
 			entries[i].WorkPackageClosed = isClosed
+		}
+	}
+
+	return nil
+}
+
+// EnrichWithSummaries fetches additional data and generates LLM summaries for each work package.
+func (s *TimeEntryService) EnrichWithSummaries(entries []GroupedTimeEntry, llmService *llm.Service, week string) error {
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	inputs := make([]llm.SummarizationInput, 0, len(entries))
+	ctx := context.Background()
+
+	// Get current user
+	currentUser, err := s.client.GetCurrentUser()
+	if err != nil {
+		return fmt.Errorf("failed to get current user: %w", err)
+	}
+
+	// Calculate start date for the period of interest
+	var startDate time.Time
+	now := time.Now()
+	if week == "Current week" {
+		startDate = startOfWeek(now)
+	} else {
+		lastWeek := now.AddDate(0, 0, -7)
+		startDate = startOfWeek(lastWeek)
+	}
+	periodStart := startDate.Format("2006-01-02")
+
+	// Step 1: Fetch work package details and activities in parallel
+	for _, entry := range entries {
+		wg.Add(1)
+		go func(entry GroupedTimeEntry) {
+			defer wg.Done()
+
+			// Fetch work package for description
+			workPackage, err := s.client.GetWorkPackage(entry.WorkPackageID)
+			if err != nil {
+				fmt.Printf("Failed to get work package %d: %v\n", entry.WorkPackageID, err)
+				return
+			}
+
+			// Fetch activities for comments
+			activities, err := s.client.GetWorkPackageActivities(entry.WorkPackageID)
+			if err != nil {
+				fmt.Printf("Failed to get activities for work package %d: %v\n", entry.WorkPackageID, err)
+				return
+			}
+
+			var activityDetails []llm.ActivityDetail
+			for _, act := range activities {
+				if act.Comment.Raw != "" {
+					author := act.Links.User.Title
+					if author == currentUser.Name {
+						author = "Me"
+					}
+					activityDetails = append(activityDetails, llm.ActivityDetail{
+						Content:   fmt.Sprintf("%s: %s", author, act.Comment.Raw),
+						Timestamp: act.CreatedAt,
+					})
+				}
+			}
+
+			mu.Lock()
+			inputs = append(inputs, llm.SummarizationInput{
+				WorkPackageID:     entry.WorkPackageID,
+				Subject:           entry.WorkPackageTitle,
+				Description:       workPackage.Description.Raw,
+				Status:            workPackage.Links.Status.Title,
+				Activities:        activityDetails,
+				TimeEntryComments: entry.TimeEntryComments,
+				PeriodStart:       periodStart,
+			})
+			mu.Unlock()
+		}(entry)
+	}
+	wg.Wait()
+
+	// Step 2: Get summaries from the LLM service
+	summaries := llmService.SummarizeWorkPackages(ctx, inputs)
+
+	// Step 3: Update entries with summaries
+	for i := range entries {
+		if summary, ok := summaries[entries[i].WorkPackageID]; ok {
+			entries[i].LLMSummary = summary
 		}
 	}
 

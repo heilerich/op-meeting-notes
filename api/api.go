@@ -151,3 +151,41 @@ func (c *Client) GetStatus(statusHref string) (*Status, error) {
 
 	return &status, nil
 }
+
+// GetWorkPackageActivities retrieves all activities for a specific work package
+func (c *Client) GetWorkPackageActivities(workPackageID int) ([]Activity, error) {
+	path := fmt.Sprintf("/api/v3/work_packages/%d/activities", workPackageID)
+
+	// Make the request
+	body, err := c.makeRequest(path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse response
+	var activitiesResp ActivitiesResponse
+	if err := json.Unmarshal(body, &activitiesResp); err != nil {
+		return nil, fmt.Errorf("failed to parse activities response: %v", err)
+	}
+
+	return activitiesResp.Embedded.Elements, nil
+}
+
+// GetCurrentUser fetches details for the current user
+func (c *Client) GetCurrentUser() (*User, error) {
+	path := "/api/v3/users/me"
+
+	// Make the request
+	body, err := c.makeRequest(path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse response
+	var user User
+	if err := json.Unmarshal(body, &user); err != nil {
+		return nil, fmt.Errorf("failed to parse user response: %v", err)
+	}
+
+	return &user, nil
+}

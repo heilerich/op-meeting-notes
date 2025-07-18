@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"golang.org/x/term"
 
+	"github.com/heilerich/op-meeting-notes/llm"
 	"github.com/heilerich/op-meeting-notes/models"
 )
 
@@ -38,18 +39,20 @@ type LoadingModel struct {
 
 // Main model that manages different screens
 type Model struct {
-	state            string // "week", "loading", "loadingTaskStatus", "entries", "done", "confirm_url"
+	state            string // "week", "loading", "loadingTaskStatus", "loadingSummaries", "entries", "done", "confirm_url"
 	weekModel        WeekSelectionModel
 	loadingModel     LoadingModel
 	entriesModel     TimeEntriesModel
 	groupedEntries   []models.GroupedTimeEntry
 	selectedWeek     string
 	timeEntryService *models.TimeEntryService
+	llmService       *llm.Service
 }
 
 // Messages
 type TimeEntriesMsg []models.GroupedTimeEntry
 type StatusUpdateCompleteMsg []models.GroupedTimeEntry
+type SummarizationCompleteMsg []models.GroupedTimeEntry
 type ErrorMsg error
 
 // Item implements list.Item interface for time entries
@@ -131,7 +134,7 @@ func (d CustomDelegate) Render(w io.Writer, m list.Model, index int, listItem li
 }
 
 // NewModel creates a new UI model
-func NewModel(timeEntryService *models.TimeEntryService) Model {
+func NewModel(timeEntryService *models.TimeEntryService, llmService *llm.Service) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
@@ -148,6 +151,7 @@ func NewModel(timeEntryService *models.TimeEntryService) Model {
 			selected: make(map[int]struct{}),
 		},
 		timeEntryService: timeEntryService,
+		llmService:       llmService,
 	}
 }
 
@@ -202,7 +206,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = "entries"
 
 	case StatusUpdateCompleteMsg:
-		// Status update completed, update our entries and show the confirmation view
+		// Status update completed, now fetch summaries
+		m.groupedEntries = []models.GroupedTimeEntry(msg)
+		m.state = "loadingSummaries"
+		return m, tea.Batch(
+			m.loadingModel.spinner.Tick,
+			m.enrichEntriesWithSummaries(),
+		)
+
+	case SummarizationCompleteMsg:
+		// Summarization completed, show the confirmation view
 		m.groupedEntries = []models.GroupedTimeEntry(msg)
 		m.state = "confirm_url"
 		return m, nil
@@ -213,7 +226,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case spinner.TickMsg:
-		if m.state == "loading" || m.state == "loadingTaskStatus" {
+		if m.state == "loading" || m.state == "loadingTaskStatus" || m.state == "loadingSummaries" {
 			var cmd tea.Cmd
 			m.loadingModel.spinner, cmd = m.loadingModel.spinner.Update(msg)
 			return m, cmd
@@ -354,6 +367,43 @@ func (m Model) updateSelectedEntriesStatus() tea.Cmd {
 	}
 }
 
+// enrichEntriesWithSummaries creates a command to enrich entries with LLM summaries
+func (m Model) enrichEntriesWithSummaries() tea.Cmd {
+	return func() tea.Msg {
+		// Get only the selected entries
+		selectedEntries := make([]models.GroupedTimeEntry, 0, len(m.entriesModel.selected))
+		for index := range m.entriesModel.selected {
+			if index < len(m.groupedEntries) {
+				selectedEntries = append(selectedEntries, m.groupedEntries[index])
+			}
+		}
+
+		// Enrich the selected entries with summaries
+		err := m.timeEntryService.EnrichWithSummaries(selectedEntries, m.llmService, m.selectedWeek)
+		if err != nil {
+			return ErrorMsg(err)
+		}
+
+		// Create updated copy of all entries with the new summary information
+		updatedEntries := make([]models.GroupedTimeEntry, len(m.groupedEntries))
+		copy(updatedEntries, m.groupedEntries)
+
+		// Update the entries with the summary information from selectedEntries
+		for _, selectedEntry := range selectedEntries {
+			// Find the corresponding entry in the updated slice and update it
+			for j := range updatedEntries {
+				if updatedEntries[j].WorkPackageID == selectedEntry.WorkPackageID &&
+					updatedEntries[j].ProjectTitle == selectedEntry.ProjectTitle {
+					updatedEntries[j].LLMSummary = selectedEntry.LLMSummary
+					break
+				}
+			}
+		}
+
+		return SummarizationCompleteMsg(updatedEntries)
+	}
+}
+
 func (m Model) View() string {
 	switch m.state {
 	case "week":
@@ -362,6 +412,8 @@ func (m Model) View() string {
 		return m.loadingView("time entries")
 	case "loadingTaskStatus":
 		return m.loadingView("task status")
+	case "loadingSummaries":
+		return m.loadingView("AI summaries")
 	case "entries":
 		return m.timeEntriesView()
 	case "confirm_url":

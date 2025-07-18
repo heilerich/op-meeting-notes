@@ -54,9 +54,11 @@ func (m Model) doneView() string {
 		for _, entry := range entries {
 			workPackageID := entry.WorkPackageID
 
-			// Use the combined comment from the grouped entry
+			// Use the LLM summary if available, otherwise fall back to the combined comment
 			comments := entry.CombinedComment
-			if comments == "" {
+			if entry.LLMSummary != "" {
+				comments = entry.LLMSummary
+			} else if comments == "" {
 				comments = "(no comments)"
 			}
 
