@@ -15,7 +15,12 @@ func calculateProjectTotals(entries []models.GroupedTimeEntry) map[string]float6
 	projectTotals := make(map[string]float64)
 	for _, entry := range entries {
 		projectTotals[entry.ProjectTitle] += entry.TotalHours
+		// Debug: print entry details
+		fmt.Printf("DEBUG: Project=%s, WorkPackage=%d, TotalHours=%.2f\n",
+			entry.ProjectTitle, entry.WorkPackageID, entry.TotalHours)
 	}
+	// Debug: print final totals
+	fmt.Printf("DEBUG: Final project totals: %+v\n", projectTotals)
 	return projectTotals
 }
 
@@ -100,9 +105,6 @@ func (m Model) doneView() string {
 	// Build markdown document
 	var markdown strings.Builder
 
-	// Add bar chart at the beginning
-	markdown.WriteString(generateBarChart(projectTotals))
-
 	// Sort projects alphabetically
 	var projects []string
 	for project := range projectEntries {
@@ -151,6 +153,9 @@ func (m Model) doneView() string {
 
 		markdown.WriteString("\n")
 	}
+
+	// Add bar chart at the end
+	markdown.WriteString(generateBarChart(projectTotals))
 
 	// Copy to clipboard
 	if err := copyToClipboard(markdown.String()); err != nil {
