@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Achsion/iso8601/v2"
 	"github.com/heilerich/op-meeting-notes/api"
 	"github.com/heilerich/op-meeting-notes/llm"
 )
@@ -103,9 +104,12 @@ func (s *TimeEntryService) groupTimeEntries(entries []api.TimeEntry) []GroupedTi
 				})
 			}
 			// Parse hours and add to total
-			if hours, err := strconv.ParseFloat(entry.Hours, 64); err == nil {
-				totalHours += hours
+			duration, err := iso8601.ParseToDuration(entry.Hours)
+			if err != nil {
+				fmt.Println("conv error: %s", err)
+				continue
 			}
+			totalHours += duration.Hours()
 		}
 
 		// Create the combined comment
