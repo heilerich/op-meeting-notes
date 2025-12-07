@@ -15,12 +15,7 @@ func calculateProjectTotals(entries []models.GroupedTimeEntry) map[string]float6
 	projectTotals := make(map[string]float64)
 	for _, entry := range entries {
 		projectTotals[entry.ProjectTitle] += entry.TotalHours
-		// Debug: print entry details
-		fmt.Printf("DEBUG: Project=%s, WorkPackage=%d, TotalHours=%.2f\n",
-			entry.ProjectTitle, entry.WorkPackageID, entry.TotalHours)
 	}
-	// Debug: print final totals
-	fmt.Printf("DEBUG: Final project totals: %+v\n", projectTotals)
 	return projectTotals
 }
 

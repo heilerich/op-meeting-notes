@@ -178,13 +178,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.originalEntries = make([]models.GroupedTimeEntry, len(m.groupedEntries))
 		copy(m.originalEntries, m.groupedEntries)
 
-		// Debug: Check TotalHours after initial load
-		fmt.Println("DEBUG: TimeEntriesMsg received")
-		for i, entry := range m.groupedEntries {
-			fmt.Printf("DEBUG: [%d] Project=%s, WP=%d, TotalHours=%.2f\n",
-				i, entry.ProjectTitle, entry.WorkPackageID, entry.TotalHours)
-		}
-
 		// Convert grouped entries to list items
 		items := make([]list.Item, 0, len(m.groupedEntries))
 		for _, entry := range m.groupedEntries {
@@ -220,13 +213,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Status update completed, now fetch summaries
 		m.groupedEntries = []models.GroupedTimeEntry(msg)
 
-		// Debug: Check TotalHours after status update
-		fmt.Println("DEBUG: StatusUpdateCompleteMsg received")
-		for i, entry := range m.groupedEntries {
-			fmt.Printf("DEBUG: [%d] Project=%s, WP=%d, TotalHours=%.2f\n",
-				i, entry.ProjectTitle, entry.WorkPackageID, entry.TotalHours)
-		}
-
 		m.state = "loadingSummaries"
 		return m, tea.Batch(
 			m.loadingModel.spinner.Tick,
@@ -236,13 +222,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SummarizationCompleteMsg:
 		// Summarization completed, show the confirmation view
 		m.groupedEntries = []models.GroupedTimeEntry(msg)
-
-		// Debug: Check TotalHours after summarization
-		fmt.Println("DEBUG: SummarizationCompleteMsg received")
-		for i, entry := range m.groupedEntries {
-			fmt.Printf("DEBUG: [%d] Project=%s, WP=%d, TotalHours=%.2f\n",
-				i, entry.ProjectTitle, entry.WorkPackageID, entry.TotalHours)
-		}
 
 		m.state = "confirm_url"
 		return m, nil
@@ -378,13 +357,6 @@ func (m Model) updateSelectedEntriesStatus() tea.Cmd {
 		updatedEntries := make([]models.GroupedTimeEntry, len(m.groupedEntries))
 		copy(updatedEntries, m.groupedEntries)
 
-		// Debug: Check if copy preserved TotalHours
-		fmt.Println("DEBUG: After copy in updateSelectedEntriesStatus")
-		for i, entry := range updatedEntries {
-			fmt.Printf("DEBUG: [%d] Project=%s, WP=%d, TotalHours=%.2f\n",
-				i, entry.ProjectTitle, entry.WorkPackageID, entry.TotalHours)
-		}
-
 		// Update the entries with the status information from selectedEntries
 		for _, selectedEntry := range selectedEntries {
 			// Find the corresponding entry in the updated slice and update it
@@ -421,13 +393,6 @@ func (m Model) enrichEntriesWithSummaries() tea.Cmd {
 		// Create updated copy of all entries with the new summary information
 		updatedEntries := make([]models.GroupedTimeEntry, len(m.groupedEntries))
 		copy(updatedEntries, m.groupedEntries)
-
-		// Debug: Check if copy preserved TotalHours
-		fmt.Println("DEBUG: After copy in enrichEntriesWithSummaries")
-		for i, entry := range updatedEntries {
-			fmt.Printf("DEBUG: [%d] Project=%s, WP=%d, TotalHours=%.2f\n",
-				i, entry.ProjectTitle, entry.WorkPackageID, entry.TotalHours)
-		}
 
 		// Update the entries with the summary information from selectedEntries
 		for _, selectedEntry := range selectedEntries {
