@@ -44,6 +44,7 @@ type Model struct {
 	loadingModel     LoadingModel
 	entriesModel     TimeEntriesModel
 	groupedEntries   []models.GroupedTimeEntry
+	originalEntries  []models.GroupedTimeEntry // Preserve original entries for bar chart calculation
 	selectedWeek     string
 	timeEntryService *models.TimeEntryService
 	llmService       *llm.Service
@@ -173,6 +174,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case TimeEntriesMsg:
 		m.groupedEntries = []models.GroupedTimeEntry(msg)
+		// Store original entries for bar chart calculation (before any modifications)
+		m.originalEntries = make([]models.GroupedTimeEntry, len(m.groupedEntries))
+		copy(m.originalEntries, m.groupedEntries)
 
 		// Convert grouped entries to list items
 		items := make([]list.Item, 0, len(m.groupedEntries))
@@ -208,6 +212,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case StatusUpdateCompleteMsg:
 		// Status update completed, now fetch summaries
 		m.groupedEntries = []models.GroupedTimeEntry(msg)
+
 		m.state = "loadingSummaries"
 		return m, tea.Batch(
 			m.loadingModel.spinner.Tick,
@@ -217,6 +222,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SummarizationCompleteMsg:
 		// Summarization completed, show the confirmation view
 		m.groupedEntries = []models.GroupedTimeEntry(msg)
+
 		m.state = "confirm_url"
 		return m, nil
 

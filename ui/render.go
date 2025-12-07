@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"math"
 	"os/exec"
 	"sort"
 	"strings"
@@ -9,10 +10,82 @@ import (
 	"github.com/heilerich/op-meeting-notes/models"
 )
 
+// calculateProjectTotals calculates total hours per project from all time entries
+func calculateProjectTotals(entries []models.GroupedTimeEntry) map[string]float64 {
+	projectTotals := make(map[string]float64)
+	for _, entry := range entries {
+		projectTotals[entry.ProjectTitle] += entry.TotalHours
+	}
+	return projectTotals
+}
+
+// generateBarChart creates an ASCII horizontal bar chart for project time totals
+func generateBarChart(projectTotals map[string]float64) string {
+	if len(projectTotals) == 0 {
+		return ""
+	}
+
+	var result strings.Builder
+	result.WriteString("**Time Spent per Project**\n\n")
+	result.WriteString("```\n")
+
+	// Sort projects alphabetically
+	var projects []string
+	for project := range projectTotals {
+		projects = append(projects, project)
+	}
+	sort.Strings(projects)
+
+	// Find max hours for scaling
+	maxHours := 0.0
+	for _, hours := range projectTotals {
+		if hours > maxHours {
+			maxHours = hours
+		}
+	}
+
+	// Find longest project name for alignment
+	maxNameLen := 0
+	for _, project := range projects {
+		if len(project) > maxNameLen {
+			maxNameLen = len(project)
+		}
+	}
+
+	// Generate bar chart
+	const maxBarWidth = 40
+	for _, project := range projects {
+		hours := projectTotals[project]
+
+		// Calculate bar width (scaled to max bar width)
+		barWidth := 0
+		if maxHours > 0 {
+			barWidth = int(math.Round((hours / maxHours) * float64(maxBarWidth)))
+		}
+		if barWidth < 1 && hours > 0 {
+			barWidth = 1 // Ensure at least 1 character for non-zero values
+		}
+
+		// Create the bar
+		bar := strings.Repeat("█", barWidth)
+
+		// Format: "Project Name    ███████████ 12.5h"
+		result.WriteString(fmt.Sprintf("%-*s %s %.1fh\n",
+			maxNameLen, project, bar, hours))
+	}
+
+	result.WriteString("```\n\n")
+	return result.String()
+}
+
 func (m Model) doneView() string {
 	if len(m.entriesModel.selected) == 0 {
 		return QuitTextStyle.Render("No entries selected. Goodbye!")
 	}
+
+	// Calculate total time per project from ALL ORIGINAL entries (before any modifications)
+	// Use originalEntries which was saved when entries were first loaded
+	projectTotals := calculateProjectTotals(m.originalEntries)
 
 	// Group selected entries by project using updated entries
 	projectEntries := make(map[string][]models.GroupedTimeEntry)
@@ -76,6 +149,9 @@ func (m Model) doneView() string {
 
 		markdown.WriteString("\n")
 	}
+
+	// Add bar chart at the end
+	markdown.WriteString(generateBarChart(projectTotals))
 
 	// Copy to clipboard
 	if err := copyToClipboard(markdown.String()); err != nil {
