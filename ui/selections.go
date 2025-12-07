@@ -44,6 +44,7 @@ type Model struct {
 	loadingModel     LoadingModel
 	entriesModel     TimeEntriesModel
 	groupedEntries   []models.GroupedTimeEntry
+	originalEntries  []models.GroupedTimeEntry // Preserve original entries for bar chart calculation
 	selectedWeek     string
 	timeEntryService *models.TimeEntryService
 	llmService       *llm.Service
@@ -173,6 +174,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case TimeEntriesMsg:
 		m.groupedEntries = []models.GroupedTimeEntry(msg)
+		// Store original entries for bar chart calculation (before any modifications)
+		m.originalEntries = make([]models.GroupedTimeEntry, len(m.groupedEntries))
+		copy(m.originalEntries, m.groupedEntries)
 
 		// Debug: Check TotalHours after initial load
 		fmt.Println("DEBUG: TimeEntriesMsg received")

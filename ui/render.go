@@ -88,8 +88,9 @@ func (m Model) doneView() string {
 		return QuitTextStyle.Render("No entries selected. Goodbye!")
 	}
 
-	// Calculate total time per project from ALL entries (not just selected)
-	projectTotals := calculateProjectTotals(m.groupedEntries)
+	// Calculate total time per project from ALL ORIGINAL entries (before any modifications)
+	// Use originalEntries which was saved when entries were first loaded
+	projectTotals := calculateProjectTotals(m.originalEntries)
 
 	// Group selected entries by project using updated entries
 	projectEntries := make(map[string][]models.GroupedTimeEntry)
