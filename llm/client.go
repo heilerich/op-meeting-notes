@@ -39,7 +39,7 @@ func (c *Client) Summarize(ctx context.Context, prompt string) (string, error) {
 	reqPayload := OpenAIRequest{
 		Model: c.model,
 		Messages: []Message{
-			{Role: "system", Content: "You are a helpful assistant that summarizes project management work package details for a weekly meeting. The summary should be concise and ready to be pasted into a meeting notes document."},
+			{Role: "system", Content: "You are a helpful assistant that generates concise status updates for weekly meeting notes based on project management data. You will receive activities and time log entries annotated with dates and [THIS WEEK] or [context only] tags. Only summarize work labeled [THIS WEEK] and only work done by 'Me' (the current user). Ignore [context only] entries and other team members' contributions entirely. The summary should be one to two sentences, ready to be pasted into a meeting notes document."},
 			{Role: "user", Content: prompt},
 		},
 		Temperature: 0.5,

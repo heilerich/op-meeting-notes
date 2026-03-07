@@ -59,6 +59,7 @@ type SummarizationInput struct {
 	Activities        []ActivityDetail
 	TimeEntryComments []TimeEntryComment
 	PeriodStart       string
+	PeriodEnd         string
 }
 
 // SummarizationResult contains the result of LLM summarization

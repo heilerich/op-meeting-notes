@@ -84,42 +84,48 @@ func (s *Service) getSummary(ctx context.Context, input SummarizationInput) (str
 func buildPrompt(input SummarizationInput) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Please summarize the following work package titled '%s'.\n", input.Subject))
-	sb.WriteString(fmt.Sprintf("The user is interested in the period starting from %s. Your summary should focus on activities and comments from this period.\n\n", input.PeriodStart))
-	sb.WriteString("You should provide a concise summary of the work done by the user while focusing on the time log entries and comments made by the user.\n\n")
+	sb.WriteString(fmt.Sprintf("The summary week covers %s to %s.\n", input.PeriodStart, input.PeriodEnd))
+	sb.WriteString("IMPORTANT: Only include work done during THIS WEEK in your summary. Entries labeled [context only] are provided as background information and must NOT be included in the summary.\n")
+	sb.WriteString("IMPORTANT: Only summarize work done by 'Me' (the current user). Ignore work done by other team members.\n\n")
 	sb.WriteString("Description:\n")
 	sb.WriteString(input.Description + "\n\n")
 	sb.WriteString("Status: ")
 	sb.WriteString(input.Status + "\n\n")
 
 	if len(input.Activities) > 0 {
-		sb.WriteString("Recent Activities/Comments:\n")
+		sb.WriteString("Work Package Comments/Activities:\n")
 		for _, activity := range input.Activities {
-			label := getLabel(activity.Timestamp, input.PeriodStart)
+			label := getLabel(activity.Timestamp, input.PeriodStart, input.PeriodEnd)
 			sb.WriteString(fmt.Sprintf("- %s: %s\n", label, activity.Content))
 		}
 		sb.WriteString("\n")
 	}
 
 	if len(input.TimeEntryComments) > 0 {
-		sb.WriteString("Associated Time Entry Comments:\n")
+		sb.WriteString("My Time Log Entries for This Week (by Me, all within the summary week):\n")
 		for _, comment := range input.TimeEntryComments {
-			sb.WriteString(fmt.Sprintf("- %s\n", comment.Content))
+			dateLabel := formatSpentOnLabel(comment.Timestamp)
+			sb.WriteString(fmt.Sprintf("- %s: %s\n", dateLabel, comment.Content))
 		}
 		sb.WriteString("\n")
 	}
 
-	sb.WriteString("Provide a concise summary of one to two sentences. The context will be clear to the reader, so no need to explain the work package or its purpose. Any answer that contains the phrase 'work package' or the repeats the work package title or description is definitely too long. Good examples would be 'moved remaining servers to NEZ, got network card from old ESX server', 'setup complete, waiting for firewall', 'meeting with John Doe: firewall was misconfigured'.\n")
+	sb.WriteString("Provide a concise summary of one to two sentences covering only what 'Me' accomplished THIS WEEK. The context will be clear to the reader, so no need to explain the work package or its purpose. Any answer that contains the phrase 'work package' or repeats the work package title or description is definitely too long. Good examples would be 'moved remaining servers to NEZ, got network card from old ESX server', 'setup complete, waiting for firewall', 'meeting with John Doe: firewall was misconfigured'.\n")
 	return sb.String()
 }
 
 // getCacheKey generates a SHA256 hash for the input content to use as a cache key
 func getCacheKey(input SummarizationInput) string {
 	var content strings.Builder
+	content.WriteString(input.PeriodStart)
+	content.WriteString(input.PeriodEnd)
 	content.WriteString(input.Description)
 	for _, activity := range input.Activities {
+		content.WriteString(activity.Timestamp)
 		content.WriteString(activity.Content)
 	}
 	for _, comment := range input.TimeEntryComments {
+		content.WriteString(comment.Timestamp)
 		content.WriteString(comment.Content)
 	}
 
@@ -127,22 +133,40 @@ func getCacheKey(input SummarizationInput) string {
 	return hex.EncodeToString(hash[:])
 }
 
-// getLabel determines if the timestamp is before or within the period of interest
-func getLabel(timestamp, periodStart string) string {
+// getLabel returns a formatted date label indicating whether the activity falls within the summary week
+func getLabel(timestamp, periodStart, periodEnd string) string {
 	ts, err := time.Parse(time.RFC3339, timestamp)
 	if err != nil {
-		// Fallback for invalid timestamps
-		return "UNKNOWN"
+		return fmt.Sprintf("UNKNOWN DATE [context only]")
 	}
 
 	ps, err := time.Parse("2006-01-02", periodStart)
 	if err != nil {
-		// Fallback for invalid period start
-		return "UNKNOWN"
+		return fmt.Sprintf("UNKNOWN DATE [context only]")
 	}
 
-	if ts.Before(ps) {
-		return "Before Period"
+	pe, err := time.Parse("2006-01-02", periodEnd)
+	if err != nil {
+		return fmt.Sprintf("UNKNOWN DATE [context only]")
 	}
-	return "In Period"
+	// Include the full end day
+	pe = pe.Add(24*time.Hour - time.Second)
+
+	dateStr := ts.Format("Mon 2006-01-02")
+	if ts.Before(ps) || ts.After(pe) {
+		return fmt.Sprintf("%s [context only]", dateStr)
+	}
+	return fmt.Sprintf("%s [THIS WEEK]", dateStr)
+}
+
+// formatSpentOnLabel formats a "2006-01-02" date string as "Mon 2006-01-02"
+func formatSpentOnLabel(spentOn string) string {
+	t, err := time.Parse("2006-01-02", spentOn)
+	if err != nil {
+		t, err = time.Parse(time.RFC3339, spentOn)
+		if err != nil {
+			return spentOn
+		}
+	}
+	return t.Format("Mon 2006-01-02")
 }
