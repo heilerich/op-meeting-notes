@@ -10,18 +10,52 @@ import (
 	"github.com/heilerich/op-meeting-notes/models"
 )
 
-// calculateProjectTotals calculates total hours per project from all time entries
-func calculateProjectTotals(entries []models.GroupedTimeEntry) map[string]float64 {
-	projectTotals := make(map[string]float64)
-	for _, entry := range entries {
-		projectTotals[entry.ProjectTitle] += entry.TotalHours
+// activityChars maps activity types to distinct ASCII/Unicode characters for the bar chart
+var activityChars = []struct {
+	char rune
+}{
+	{'█'}, {'▓'}, {'▒'}, {'░'}, {'#'}, {'='}, {'~'}, {'+'}, {':'}, {'.'},
+}
+
+// projectActivityTotals holds per-project, per-activity-type hour totals
+type projectActivityTotals struct {
+	projectTotals     map[string]float64
+	projectActivities map[string]map[string]float64 // project -> activity -> hours
+	activityOrder     []string                      // sorted list of all activity types
+}
+
+// calculateProjectTotals calculates total hours per project and per activity type
+func calculateProjectTotals(entries []models.GroupedTimeEntry) projectActivityTotals {
+	totals := projectActivityTotals{
+		projectTotals:     make(map[string]float64),
+		projectActivities: make(map[string]map[string]float64),
 	}
-	return projectTotals
+	allActivities := make(map[string]bool)
+
+	for _, entry := range entries {
+		totals.projectTotals[entry.ProjectTitle] += entry.TotalHours
+		if totals.projectActivities[entry.ProjectTitle] == nil {
+			totals.projectActivities[entry.ProjectTitle] = make(map[string]float64)
+		}
+		for activity, hours := range entry.ActivityHours {
+			totals.projectActivities[entry.ProjectTitle][activity] += hours
+			allActivities[activity] = true
+		}
+	}
+
+	// Sort activity types alphabetically for consistent ordering
+	for activity := range allActivities {
+		totals.activityOrder = append(totals.activityOrder, activity)
+	}
+	sort.Strings(totals.activityOrder)
+
+	return totals
 }
 
 // generateBarChart creates an ASCII horizontal bar chart for project time totals
-func generateBarChart(projectTotals map[string]float64) string {
-	if len(projectTotals) == 0 {
+// with activity type breakdown using different characters
+func generateBarChart(totals projectActivityTotals) string {
+	if len(totals.projectTotals) == 0 {
 		return ""
 	}
 
@@ -31,14 +65,14 @@ func generateBarChart(projectTotals map[string]float64) string {
 
 	// Sort projects alphabetically
 	var projects []string
-	for project := range projectTotals {
+	for project := range totals.projectTotals {
 		projects = append(projects, project)
 	}
 	sort.Strings(projects)
 
 	// Find max hours for scaling
 	maxHours := 0.0
-	for _, hours := range projectTotals {
+	for _, hours := range totals.projectTotals {
 		if hours > maxHours {
 			maxHours = hours
 		}
@@ -52,29 +86,81 @@ func generateBarChart(projectTotals map[string]float64) string {
 		}
 	}
 
+	// Build activity type to character mapping
+	activityCharMap := make(map[string]rune)
+	for i, activity := range totals.activityOrder {
+		charIdx := i % len(activityChars)
+		activityCharMap[activity] = activityChars[charIdx].char
+	}
+
 	// Generate bar chart
 	const maxBarWidth = 40
 	for _, project := range projects {
-		hours := projectTotals[project]
+		hours := totals.projectTotals[project]
 
-		// Calculate bar width (scaled to max bar width)
-		barWidth := 0
+		// Calculate total bar width (scaled to max bar width)
+		totalBarWidth := 0
 		if maxHours > 0 {
-			barWidth = int(math.Round((hours / maxHours) * float64(maxBarWidth)))
+			totalBarWidth = int(math.Round((hours / maxHours) * float64(maxBarWidth)))
 		}
-		if barWidth < 1 && hours > 0 {
-			barWidth = 1 // Ensure at least 1 character for non-zero values
+		if totalBarWidth < 1 && hours > 0 {
+			totalBarWidth = 1
 		}
 
-		// Create the bar
-		bar := strings.Repeat("█", barWidth)
+		// Build stacked bar segments by activity type
+		var bar strings.Builder
+		activities := totals.projectActivities[project]
+		usedWidth := 0
 
-		// Format: "Project Name    ███████████ 12.5h"
+		for i, activity := range totals.activityOrder {
+			actHours, ok := activities[activity]
+			if !ok || actHours <= 0 {
+				continue
+			}
+
+			// Calculate segment width proportional to activity hours
+			segWidth := int(math.Round((actHours / hours) * float64(totalBarWidth)))
+			if segWidth < 1 && actHours > 0 {
+				segWidth = 1
+			}
+
+			// Last activity segment gets remaining width to avoid rounding issues
+			isLast := true
+			for _, remaining := range totals.activityOrder[i+1:] {
+				if h, ok := activities[remaining]; ok && h > 0 {
+					isLast = false
+					break
+				}
+			}
+			if isLast {
+				segWidth = totalBarWidth - usedWidth
+			} else if usedWidth+segWidth > totalBarWidth {
+				segWidth = totalBarWidth - usedWidth
+			}
+
+			if segWidth > 0 {
+				bar.WriteString(strings.Repeat(string(activityCharMap[activity]), segWidth))
+				usedWidth += segWidth
+			}
+		}
+
 		result.WriteString(fmt.Sprintf("%-*s %s %.1fh\n",
-			maxNameLen, project, bar, hours))
+			maxNameLen, project, bar.String(), hours))
 	}
 
 	result.WriteString("```\n\n")
+
+	// Add legend
+	if len(totals.activityOrder) > 0 {
+		result.WriteString("Legend: ")
+		var legendParts []string
+		for _, activity := range totals.activityOrder {
+			legendParts = append(legendParts,
+				fmt.Sprintf("`%s` %s", string(activityCharMap[activity]), activity))
+		}
+		result.WriteString(strings.Join(legendParts, "  ") + "\n\n")
+	}
+
 	return result.String()
 }
 
@@ -85,7 +171,7 @@ func (m Model) doneView() string {
 
 	// Calculate total time per project from ALL ORIGINAL entries (before any modifications)
 	// Use originalEntries which was saved when entries were first loaded
-	projectTotals := calculateProjectTotals(m.originalEntries)
+	totals := calculateProjectTotals(m.originalEntries)
 
 	// Group selected entries by project using updated entries
 	projectEntries := make(map[string][]models.GroupedTimeEntry)
@@ -151,7 +237,7 @@ func (m Model) doneView() string {
 	}
 
 	// Add bar chart at the end
-	markdown.WriteString(generateBarChart(projectTotals))
+	markdown.WriteString(generateBarChart(totals))
 
 	// Copy to clipboard
 	if err := copyToClipboard(markdown.String()); err != nil {

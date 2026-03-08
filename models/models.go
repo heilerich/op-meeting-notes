@@ -35,6 +35,7 @@ type GroupedTimeEntry struct {
 	CombinedComment   string
 	LLMSummary        string // New field for the summary
 	TotalHours        float64
+	ActivityHours     map[string]float64 // Hours broken down by activity type (e.g. "Development", "Support")
 	TimeEntryComments []llm.TimeEntryComment
 	Representative    api.TimeEntry
 }
@@ -94,6 +95,7 @@ func (s *TimeEntryService) groupTimeEntries(entries []api.TimeEntry) []GroupedTi
 		var comments []string
 		var timeEntryComments []llm.TimeEntryComment
 		var totalHours float64
+		activityHours := make(map[string]float64)
 
 		for _, entry := range entries {
 			if entry.Comment.Raw != "" {
@@ -109,7 +111,15 @@ func (s *TimeEntryService) groupTimeEntries(entries []api.TimeEntry) []GroupedTi
 				fmt.Println("conv error: %s", err)
 				continue
 			}
-			totalHours += duration.Hours()
+			hours := duration.Hours()
+			totalHours += hours
+
+			// Track hours by activity type
+			activityType := entry.Links.Activity.Title
+			if activityType == "" {
+				activityType = "Other"
+			}
+			activityHours[activityType] += hours
 		}
 
 		// Create the combined comment
@@ -124,6 +134,7 @@ func (s *TimeEntryService) groupTimeEntries(entries []api.TimeEntry) []GroupedTi
 			WorkPackageTitle:  key.workPackageTitle,
 			CombinedComment:   combinedComment,
 			TotalHours:        totalHours,
+			ActivityHours:     activityHours,
 			TimeEntryComments: timeEntryComments,
 			Representative:    entries[0], // Use first entry as representative
 		})
