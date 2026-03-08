@@ -329,7 +329,7 @@ func (s *TimeEntryService) EnrichWithSummaries(entries []GroupedTimeEntry, llmSe
 		return fmt.Errorf("failed to get current user: %w", err)
 	}
 
-	// Calculate start date for the period of interest
+	// Calculate start and end date for the period of interest
 	var startDate time.Time
 	now := time.Now()
 	if week == "Current week" {
@@ -338,7 +338,9 @@ func (s *TimeEntryService) EnrichWithSummaries(entries []GroupedTimeEntry, llmSe
 		lastWeek := now.AddDate(0, 0, -7)
 		startDate = startOfWeek(lastWeek)
 	}
+	endDate := startDate.AddDate(0, 0, 6)
 	periodStart := startDate.Format("2006-01-02")
+	periodEnd := endDate.Format("2006-01-02")
 
 	// Step 1: Fetch work package details and activities in parallel
 	for _, entry := range entries {
@@ -383,6 +385,7 @@ func (s *TimeEntryService) EnrichWithSummaries(entries []GroupedTimeEntry, llmSe
 				Activities:        activityDetails,
 				TimeEntryComments: entry.TimeEntryComments,
 				PeriodStart:       periodStart,
+				PeriodEnd:         periodEnd,
 			})
 			mu.Unlock()
 		}(entry)
