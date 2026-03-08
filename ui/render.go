@@ -150,13 +150,20 @@ func generateBarChart(totals projectActivityTotals) string {
 
 	result.WriteString("```\n\n")
 
-	// Add legend
+	// Add legend with per-activity totals
 	if len(totals.activityOrder) > 0 {
+		activityTotalHours := make(map[string]float64)
+		for _, activities := range totals.projectActivities {
+			for activity, hours := range activities {
+				activityTotalHours[activity] += hours
+			}
+		}
+
 		result.WriteString("Legend: ")
 		var legendParts []string
 		for _, activity := range totals.activityOrder {
 			legendParts = append(legendParts,
-				fmt.Sprintf("`%s` %s", string(activityCharMap[activity]), activity))
+				fmt.Sprintf("`%s` %s (%.1fh)", string(activityCharMap[activity]), activity, activityTotalHours[activity]))
 		}
 		result.WriteString(strings.Join(legendParts, "  ") + "\n\n")
 	}

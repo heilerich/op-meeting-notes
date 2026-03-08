@@ -85,12 +85,12 @@ func TestGenerateBarChart(t *testing.T) {
 		t.Error("Chart should contain a legend")
 	}
 
-	if !strings.Contains(chart, "Development") {
-		t.Error("Legend should contain Development activity type")
+	if !strings.Contains(chart, "Development (12.0h)") {
+		t.Error("Legend should contain Development activity type with total hours")
 	}
 
-	if !strings.Contains(chart, "Support") {
-		t.Error("Legend should contain Support activity type")
+	if !strings.Contains(chart, "Support (5.5h)") {
+		t.Error("Legend should contain Support activity type with total hours")
 	}
 }
 
