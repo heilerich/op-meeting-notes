@@ -9,7 +9,8 @@ import (
 	"github.com/keybase/go-keychain"
 )
 
-const BaseURL = "https://inference-api.metal.kn.uniklinik-freiburg.de/llm/deepseek-r1-qwen-32b/v1/chat/completions"
+const BaseURL = "https://inference-api.metal.kn.uniklinik-freiburg.de/v1/chat/completions"
+const DefaultModel = "gpt-oss-120b"
 
 type Credentials struct {
 	APIKey string
@@ -39,7 +40,7 @@ func GetCredentials() (*Credentials, error) {
 		return nil, fmt.Errorf("API key cannot be empty")
 	}
 
-	fmt.Print("LLM Model (default: gpt-3.5-turbo): ")
+	fmt.Printf("LLM Model (default: %s): ", DefaultModel)
 	model, err := reader.ReadString('\n')
 	if err != nil {
 		return nil, fmt.Errorf("failed to read model: %w", err)
@@ -47,7 +48,7 @@ func GetCredentials() (*Credentials, error) {
 	model = strings.TrimSpace(model)
 
 	if model == "" {
-		model = "gpt-3.5-turbo" // Default model
+		model = DefaultModel
 	}
 
 	creds = &Credentials{
@@ -93,7 +94,7 @@ func getFromKeychain() (*Credentials, error) {
 	// Get the model from account field (we'll store it there)
 	model := item.Account
 	if model == "" {
-		model = "gpt-3.5-turbo" // Default model if not stored
+		model = DefaultModel
 	}
 
 	return &Credentials{
